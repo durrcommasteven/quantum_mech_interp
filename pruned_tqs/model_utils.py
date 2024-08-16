@@ -39,9 +39,6 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None, param=None):
         init_spin_config=None,
     )
 
-    # states are expected to be in {-1, 1}, not {0, 1}
-    # produced_states.mul_(2).sub_(1)
-
     # note they assume shape (seq_len, batch_size)
     produced_states = produced_states.T
 

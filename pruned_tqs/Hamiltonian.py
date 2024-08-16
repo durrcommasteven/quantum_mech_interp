@@ -139,7 +139,7 @@ class Ising(Hamiltonian):
         self.param_dim = 1
         self.param_range = torch.tensor([[0.5], [1.5]])
         self.J = -1
-        self.h = 1
+        self.h = -1
         self.n_dim = len(self.system_size)
         self.periodic = periodic
         self.connections = generate_spin_idx(
@@ -169,7 +169,7 @@ class Ising(Hamiltonian):
         # param: (1, )
         self.H[1][1][0] = param
 
-    def full_H(self, param=1):
+    def full_H(self, param=-1):
         if isinstance(param, torch.Tensor):
             param = param.detach().cpu().numpy().item()
         h = param
