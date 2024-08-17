@@ -151,6 +151,12 @@ def compute_grad(model, samples, sample_weight, Eloc, symmetry=None):
         scale = 5
     E = Eloc - E_model  # (batch, )
 
+
+    #print(E.real.device, log_amp.device, E.imag.device, log_phase.device, sample_weight.device)
+
+    log_amp = log_amp.to('cpu')
+    log_phase= log_phase.to('cpu')
+
     loss = ((E.real * log_amp + E.imag * log_phase) * sample_weight).sum() * scale
     return loss, log_amp, log_phase
     # loss.backward()
@@ -219,6 +225,9 @@ def compute_observable(
     if flip_sites.any():
         log_amp, log_phase = compute_psi(model, samples, symmetry, check_duplicate=True)
 
+        log_amp = log_amp.to('cpu')
+        log_phase = log_phase.to('cpu')
+
     if phase_sites.any():
         spin_pm = (1 - 2 * samples).to(torch.get_default_dtype())  # +-1, (n, batch)
 
@@ -228,6 +237,7 @@ def compute_observable(
             psixp_over_psix = compute_flip(
                 model, samples, flip_idx, symmetry, log_amp, log_phase
             )  # (n_op, batch)
+            psixp_over_psix = psixp_over_psix.to('cpu')
             flip_results.append(psixp_over_psix)
         else:
             flip_results.append(torch.ones(1))
@@ -236,6 +246,7 @@ def compute_observable(
         if phase_sites_i.any():
             phase_idx = (spin_idx.T[phase_sites_i]).T
             Oxxp = compute_phase(spin_pm, phase_idx)  # (n_op, batch)
+            Oxxp = Oxxp.to('cpu')
             phase_results.append(Oxxp)
         else:
             phase_results.append(torch.ones(1))
@@ -313,6 +324,11 @@ def compute_flip(model, samples, flip_idx, symmetry, log_amp, log_phase):
     #
     # log_amp_1 = torch.cat(log_amp_1, dim=0).reshape(n_op, batch)
     # log_phase_1 = torch.cat(log_phase_1, dim=0).reshape(n_op, batch)
+
+    log_amp_1 = log_amp_1.to('cpu')
+    log_amp = log_amp.to('cpu')
+    log_phase_1 = log_phase_1.to('cpu')
+    log_phase = log_phase.to('cpu')
 
     return (((log_amp_1 - log_amp) + 1j * (log_phase_1 - log_phase)) / 2).exp()
 

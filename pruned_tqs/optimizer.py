@@ -62,6 +62,7 @@ class Optimizer:
 
         samples, sample_weight = sample(self.model, batch, max_unique, symmetry)
         E = H.Eloc(samples, sample_weight, self.model, use_symmetry)
+        sample_weight = sample_weight.to('cpu')
         E_mean = (E * sample_weight).sum()
         E_var = (
             (((E - E_mean).abs() ** 2 * sample_weight).sum() / H.n**2)

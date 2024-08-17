@@ -137,7 +137,7 @@ class Ising(Hamiltonian):
         self.n_dim = len(self.system_size)
         self.n = self.system_size.prod()
         self.param_dim = 1
-        self.param_range = torch.tensor([[0.5], [1.5]])
+        self.param_range = torch.tensor([[-1.5], [-0.5]])
         self.J = -1
         self.h = -1
         self.n_dim = len(self.system_size)

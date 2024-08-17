@@ -2041,7 +2041,7 @@ class HookedTransformer(HookedRootModule):
         if isinstance(param_values, tuple):
             batch_size, param_value = param_values
             param_values = torch.full(
-                size=(batch_size,), fill_value=param_value, dtype=torch.float32
+                size=(batch_size,), fill_value=param_value, dtype=torch.float32, device=self.cfg.device
             )
 
         if init_spin_config is not None:
@@ -2052,12 +2052,12 @@ class HookedTransformer(HookedRootModule):
 
         if init_spin_config is not None:
             tokens = torch.zeros(
-                size=(init_spin_config.shape[0], 1 + init_spin_config.shape[1]), dtype=torch.float32
+                size=(init_spin_config.shape[0], 1 + init_spin_config.shape[1]), dtype=torch.float32, device=self.cfg.device
             )
             tokens[:, 0] = param_values
             tokens[:, 1:] = init_spin_config
         else:
-            tokens = torch.zeros(size=(param_values.shape[0], 1), dtype=torch.float32)
+            tokens = torch.zeros(size=(param_values.shape[0], 1), dtype=torch.float32, device=self.cfg.device)
             tokens[:, 0] = param_values
 
         batch_size, ctx_length = tokens.shape
@@ -2112,11 +2112,11 @@ class HookedTransformer(HookedRootModule):
 
         assert tokens.shape[0] == sampled_logprobs.shape[0] == batch_size
         assert tokens.shape[-1] == system_size
-        return tokens.to(torch.long), sampled_logprobs
+        return tokens, sampled_logprobs
 
     def map_to_binary(self, state: torch.Tensor):
         # map to binary
-        return einops.einsum(2 ** torch.arange(state.shape[-1]), state, "i, j i -> j")
+        return einops.einsum(2 ** torch.arange(state.shape[-1], device=state.device, dtype=torch.float32), state, "i, j i -> j")
 
     @torch.inference_mode()
     def generate_n_unique_states(
@@ -2140,9 +2140,9 @@ class HookedTransformer(HookedRootModule):
         max_attempts = 100
         cur_attempt = 0
 
-        output_states = torch.empty(size=(batch_size, system_size), dtype=torch.long)
-        output_log_probs = torch.empty(size=(batch_size,), dtype=torch.float32)
-        output_state_reprs = torch.full(size=(batch_size,), fill_value=-1)
+        output_states = torch.empty(size=(batch_size, system_size), dtype=torch.float32, device=self.cfg.device)
+        output_log_probs = torch.empty(size=(batch_size,), dtype=torch.float32, device=self.cfg.device)
+        output_state_reprs = torch.full(size=(batch_size,), fill_value=-1, device=self.cfg.device)
 
         num_states = 0
 
@@ -2162,7 +2162,7 @@ class HookedTransformer(HookedRootModule):
 
             # obtain unique
             unique_states, idxs = torch.unique(states, return_inverse=True, dim=0)
-            unique_log_probs = torch.zeros(size=(unique_states.shape[0],), dtype=log_probs.dtype)
+            unique_log_probs = torch.zeros(size=(unique_states.shape[0],), dtype=log_probs.dtype, device=self.cfg.device)
             unique_log_probs[idxs] = log_probs
 
             # now ensure we haven't seen these

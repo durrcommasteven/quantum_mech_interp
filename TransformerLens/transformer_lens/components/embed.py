@@ -38,7 +38,7 @@ class Embed(nn.Module):
             long_tokens = tokens.to(torch.long)
             p = tokens - torch.floor(tokens)
 
-            float_components = torch.ones(tokens.shape, dtype=self.W_E.dtype)
+            float_components = torch.ones(tokens.shape, dtype=self.W_E.dtype, device=tokens.device)
             p_gt_0 = p[p > 0]
             float_components[p > 0] = torch.log(p_gt_0 / (1 - p_gt_0))
 
