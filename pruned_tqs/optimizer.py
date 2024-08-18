@@ -11,9 +11,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import pickle
 
 from .model_utils import sample, compute_grad
 from .evaluation import compute_E_sample, compute_magnetization
+from .track_progress import *
 
 # import autograd_hacks
 
@@ -62,7 +65,7 @@ class Optimizer:
 
         samples, sample_weight = sample(self.model, batch, max_unique, symmetry)
         E = H.Eloc(samples, sample_weight, self.model, use_symmetry)
-        sample_weight = sample_weight.to('cpu')
+        sample_weight = sample_weight.to("cpu")
         E_mean = (E * sample_weight).sum()
         E_var = (
             (((E - E_mean).abs() ** 2 * sample_weight).sum() / H.n**2)
@@ -80,6 +83,8 @@ class Optimizer:
     def train(
         self,
         n_iter,
+        title,
+        description_string,
         batch=10000,
         max_unique=1000,
         param_range=(0.5, 1.5),
@@ -87,7 +92,36 @@ class Optimizer:
         use_SR=False,
         ensemble_id=0,
         start_iter=None,
+        check_kl=True,
     ):
+
+        # let's make a folder within results called title
+        if not os.path.exists(f"results/{title}"):
+            # If the directory does not exist, create it
+            os.makedirs(f"results/{title}")
+            print(f"Directory created: {f'results/{title}'}")
+        else:
+            # If the directory exists, inform the user
+            print(f"Directory already exists: {f'results/{title}'}")
+
+        # now let's save the description string, as well as the model config
+        # add the cfg to it
+
+        description_string = description_string
+        with open(f"results/{title}/{title}_description.txt", "w") as file:
+            file.write(description_string)
+
+        # save the config
+        with open(f"results/{title}/model_config.pkl", "wb") as file:
+            pickle.dump(self.model.cfg, file)
+
+        if check_kl:
+            # make sure we already have generated reference values
+            create_reference_folder(title)
+            # check that in this we have the values
+            h_values = np.linspace(-1.5, -0.5, 15)
+            compute_ising_reference_values(h_values, self.Hamiltonians[0], title)
+
         name, embedding_size, n_head, n_layers = (
             type(self.Hamiltonians[0]).__name__,
             self.model.embedding_size,
@@ -190,11 +224,11 @@ class Optimizer:
             print(
                 f"i = {i}\t {print_str} n = {n}\t lr = {scheduler.get_lr()[0]:.4e} t = {(end-start):.6f}  t_optim = {t2-t1:.6f}"
             )
+
             if i % self.save_freq == 0:
-                np.save(f"E_{save_str}.npy", E_curve)
-                with open(f"results/E_{save_str}.npy", "wb") as f:
+                with open(f"results/{title}/E_{save_str}.npy", "wb") as f:
                     np.save(f, E_curve)
-                with open(f"results/E_var_{save_str}.npy", "wb") as f:
+                with open(f"results/{title}/E_var_{save_str}.npy", "wb") as f:
                     np.save(f, E_vars)
                 if self.point_of_interest is not None:
                     E_watch[idx] = (
@@ -212,12 +246,31 @@ class Optimizer:
                         .numpy()
                     )
                     idx += 1
-                    with open(f"results/E_watch_{save_str}.npy", "wb") as f:
+                    with open(f"results/{title}/E_watch_{save_str}.npy", "wb") as f:
                         np.save(f, E_watch)
-                    with open(f"results/m_watch_{save_str}.npy", "wb") as f:
+                    with open(f"results/{title}/m_watch_{save_str}.npy", "wb") as f:
                         np.save(f, m_watch)
-                torch.save(self.model.state_dict(), f"results/model_{save_str}.ckpt")
+                torch.save(
+                    self.model.state_dict(), f"results/{title}/model_{save_str}.ckpt"
+                )
                 if i % self.ckpt_freq == 0:
                     torch.save(
-                        self.model.state_dict(), f"results/ckpt_{i}_{save_str}.ckpt"
+                        self.model.state_dict(),
+                        f"results/{title}/ckpt_{i}_{save_str}.ckpt",
                     )
+
+                if check_kl:
+                    if i % self.save_freq * 10 == 0:
+                        # then compute the kl divergence across h values
+                        for h_val in np.linspace(-1.5, -0.5, 15):
+                            tokens, log_probs = self.model.generate_state(
+                                param_values=(100, h_val),
+                                system_size=self.model.system_size,
+                            )
+
+                            cur_kl = compare_to_reference_values(
+                                tokens.to("cpu"),
+                                log_probs.to("cpu"),
+                                title=title,
+                                param=h_val,
+                            )

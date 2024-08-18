@@ -214,6 +214,19 @@ class HookedTransformer(HookedRootModule):
         # be loaded with load_sample_training_dataset
         self.dataset = None
 
+        # adapt this model for the transformer quantum state code
+        self.system_size = self.cfg.n_ctx - 1
+        self.system_sizes = [self.system_size]
+        self.param_range = None
+        self.embedding_size = self.cfg.d_model
+        self.n_head = self.cfg.n_heads
+        self.n_layers = self.cfg.n_layers
+        self.size_idx = 0
+        self.param = None
+
+        # set a 'center' param
+        self.param_center = -1
+
         # Gives each module a parameter with its name (relative to this root module)
         # Needed for HookPoints to work
         self.setup()
@@ -1982,7 +1995,7 @@ class HookedTransformer(HookedRootModule):
         if param is None:
             print("this is param range", param_range)
             self.param = (
-                param_range[0] + torch.rand(size=(1,)) * (param_range[1] - param_range[0])
+                min(param_range) + torch.rand(size=(1,)) * (max(param_range) - min(param_range))
             ).item()
         else:
             self.param = param
@@ -1992,7 +2005,7 @@ class HookedTransformer(HookedRootModule):
         param_values: torch.Tensor | float,
         state: torch.Tensor,
     ) -> torch.Tensor:
-        # Inefficient to do this seperately from generating the state,
+        # Inefficient to do this separately from generating the state,
         # but I just want to be able to pass gradient through this
         assert len(state.shape) == 2
 
@@ -2010,7 +2023,8 @@ class HookedTransformer(HookedRootModule):
 
         # combine the param and state
         tokens = torch.zeros(size=(batch_size, system_size + 1), dtype=torch.float32)
-        tokens[:, 0] = 2 + torch.nn.functional.sigmoid(param_values)
+        # note the shift
+        tokens[:, 0] = 2 + torch.nn.functional.sigmoid(param_values - self.param_center)
         tokens[:, 1:] = state.to(torch.float32)
 
         # take those logits which exist in the state
@@ -2041,23 +2055,30 @@ class HookedTransformer(HookedRootModule):
         if isinstance(param_values, tuple):
             batch_size, param_value = param_values
             param_values = torch.full(
-                size=(batch_size,), fill_value=param_value, dtype=torch.float32, device=self.cfg.device
+                size=(batch_size,),
+                fill_value=param_value,
+                dtype=torch.float32,
+                device=self.cfg.device,
             )
 
         if init_spin_config is not None:
             assert param_values.shape[0] == init_spin_config.shape[0]
 
-        # combine the param value into the input
-        param_values = 2 + torch.nn.functional.sigmoid(param_values)
-
         if init_spin_config is not None:
             tokens = torch.zeros(
-                size=(init_spin_config.shape[0], 1 + init_spin_config.shape[1]), dtype=torch.float32, device=self.cfg.device
+                size=(init_spin_config.shape[0], 1 + init_spin_config.shape[1]),
+                dtype=torch.float32,
+                device=self.cfg.device,
             )
-            tokens[:, 0] = param_values
+
+            # combine the param value into the input
+            # note the shift
+            tokens[:, 0] = 2 + torch.nn.functional.sigmoid(param_values - self.param_center)
             tokens[:, 1:] = init_spin_config
         else:
-            tokens = torch.zeros(size=(param_values.shape[0], 1), dtype=torch.float32, device=self.cfg.device)
+            tokens = torch.zeros(
+                size=(param_values.shape[0], 1), dtype=torch.float32, device=self.cfg.device
+            )
             tokens[:, 0] = param_values
 
         batch_size, ctx_length = tokens.shape
@@ -2116,7 +2137,11 @@ class HookedTransformer(HookedRootModule):
 
     def map_to_binary(self, state: torch.Tensor):
         # map to binary
-        return einops.einsum(2 ** torch.arange(state.shape[-1], device=state.device, dtype=torch.float32), state, "i, j i -> j")
+        return einops.einsum(
+            2 ** torch.arange(state.shape[-1], device=state.device, dtype=torch.float32),
+            state,
+            "i, j i -> j",
+        )
 
     @torch.inference_mode()
     def generate_n_unique_states(
@@ -2140,8 +2165,12 @@ class HookedTransformer(HookedRootModule):
         max_attempts = 100
         cur_attempt = 0
 
-        output_states = torch.empty(size=(batch_size, system_size), dtype=torch.float32, device=self.cfg.device)
-        output_log_probs = torch.empty(size=(batch_size,), dtype=torch.float32, device=self.cfg.device)
+        output_states = torch.empty(
+            size=(batch_size, system_size), dtype=torch.float32, device=self.cfg.device
+        )
+        output_log_probs = torch.empty(
+            size=(batch_size,), dtype=torch.float32, device=self.cfg.device
+        )
         output_state_reprs = torch.full(size=(batch_size,), fill_value=-1, device=self.cfg.device)
 
         num_states = 0
@@ -2162,7 +2191,9 @@ class HookedTransformer(HookedRootModule):
 
             # obtain unique
             unique_states, idxs = torch.unique(states, return_inverse=True, dim=0)
-            unique_log_probs = torch.zeros(size=(unique_states.shape[0],), dtype=log_probs.dtype, device=self.cfg.device)
+            unique_log_probs = torch.zeros(
+                size=(unique_states.shape[0],), dtype=log_probs.dtype, device=self.cfg.device
+            )
             unique_log_probs[idxs] = log_probs
 
             # now ensure we haven't seen these
@@ -2181,7 +2212,9 @@ class HookedTransformer(HookedRootModule):
 
             num_states += num_new_unique
 
-            assert cur_attempt < max_attempts, "too many attempts"
+            if cur_attempt > max_attempts:
+                print("too many attempts")
+                break
 
         # now fill the remainder if necessary
         if num_states == batch_size:
